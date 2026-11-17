@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Packet Loss Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/chart.min.js"></script>
+</head>
+<body>
+    <div id="toast-container"></div>
+    <div id="refresh-bar"></div>
+
+    <header class="top-bar">
+        <h1>Packet Loss Monitor</h1>
+        <div class="controls">
+            <button class="no-print" onclick="window.print()">Print Report</button>
+            <button onclick="toggleTheme()">Dark Mode</button>
+            <button onclick="switchTab('explorer')">SQL Explorer</button>
+            <button onclick="switchTab('settings')">Settings</button>
+            <button onclick="switchTab('alerts')">Alerts</button>
+            <button onclick="switchTab('dashboard')">Dashboard</button>
+        </div>
+    </header>
+
+    <div id="global-status-banner" class="status-banner">Loading System Status...</div>
+
+    <div class="summary-strip" id="summary-strip">
+        <span>Hosts: <strong id="sum-total">-</strong></span>
+        <span>Up: <strong id="sum-up">-</strong></span>
+        <span>Avg Loss: <strong id="sum-loss">-%</strong></span>
+        <span>Worst: <strong id="sum-worst">-</strong></span>
+        <span>Active Alerts: <strong id="sum-alerts">-</strong></span>
+    </div>
+
+    <main id="tab-dashboard" class="tab-content active">
+        <div class="table-container">
+            <div class="table-header-actions">
+                <h2>Monitored Hosts</h2>
+                <button class="no-print" onclick="openAddHostModal()">+ Add Host / Scan LAN</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Name</th>
+                        <th>Address</th>
+                        <th>Uptime (SLA)</th>
+                        <th>Last 15 Checks</th>
+                        <th>Loss %</th>
+                        <th>Latency (Min/Avg/Max)</th>
+                        <th>Jitter</th>
+                        <th class="no-print">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="hosts-tbody"></tbody>
+            </table>
+        </div>
+
+        <div class="charts-section">
+            <div class="charts-header">
+                <h3 id="chart-title">Select a host to view charts</h3>
+                <div class="chart-controls no-print">
+                    <select id="time-range" onchange="updateCharts()">
+                        <option value="900">Last 15 Min</option>
+                        <option value="3600">Last 1 Hour</option>
+                        <option value="86400">Last 24 Hours</option>
+                        <option value="0">All Time</option>
+                    </select>
+                    <button onclick="exportCSV()">Export CSV</button>
+                </div>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-box"><canvas id="lossChart"></canvas></div>
+                <div class="chart-box"><canvas id="latencyChart"></canvas></div>
+            </div>
+            <div class="heatmap-section">
+                <h4>90-Day Uptime History</h4>
+                <div id="heatmap-container" class="heatmap-grid"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- SQL Telemetry Explorer Tab -->
+    <main id="tab-explorer" class="tab-content">
+        <h2>SQL Telemetry Explorer</h2>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+            Uses SQL JOINs and parameter filtering to safely query raw metrics data.
+        </p>
+        
+        <div class="explorer-toolbar">
+            <label>Host: <select id="explorer-host"><option value="all">All Hosts</option></select></label>
+            <label>Min Loss %: <input type="number" id="explorer-loss" value="0" style="width: 80px;"></label>
+            <label>Min Jitter (ms): <input type="number" id="explorer-jitter" value="0" style="width: 80px;"></label>
+            <button onclick="runExplorerQuery()">Execute Query</button>
+        </div>
+        
+        <table class="data-table" style="margin-top: 16px;">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Host</th>
+                    <th>Loss %</th>
+                    <th>Avg Latency</th>
+                    <th>Jitter</th>
+                </tr>
+            </thead>
+            <tbody id="explorer-tbody">
+                <tr><td colspan="5">Run a query to view telemetry data.</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <main id="tab-settings" class="tab-content">
+        <h2>Settings</h2>
+        <form id="settings-form" onsubmit="saveSettings(event)" class="settings-form">
+            <label>Check Interval (seconds): <input type="number" name="check_interval"></label>
+            <label>Ping Count: <input type="number" name="ping_count"></label>
+            <label>Degraded Threshold (% loss): <input type="number" name="threshold_degraded"></label>
+            <label>Down Threshold (% loss): <input type="number" name="threshold_down"></label>
+            <label>Simulation Mode (offline demo): 
+                <select name="simulation_mode">
+                    <option value="0">Off (Real Ping)</option>
+                    <option value="1">On (Fake Data)</option>
+                </select>
+            </label>
+            <button type="submit" class="no-print">Save Settings</button>
+        </form>
+    </main>
+
+    <main id="tab-alerts" class="tab-content">
+        <div class="table-header-actions">
+            <h2>Alert Log</h2>
+            <button class="no-print" onclick="clearAllAlerts()">Clear All</button>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Host</th>
+                    <th>Severity</th>
+                    <th>Message</th>
+                    <th class="no-print">Action</th>
+                </tr>
+            </thead>
+            <tbody id="alerts-tbody"></tbody>
+        </table>
+    </main>
+
+    <!-- Trace Route Modal -->
+    <dialog id="trace-modal" class="modal" style="max-width: 600px;">
+        <h3 id="trace-title">Traceroute Analysis</h3>
+        <p style="font-size: 11px; margin-bottom: 8px;">Analyzing TTL and routing hops...</p>
+        <pre id="trace-output" class="console-output">Running trace... Please wait.</pre>
+        <div class="modal-actions">
+            <button type="button" onclick="document.getElementById('trace-modal').close()">Close</button>
+        </div>
+    </dialog>
+
+    <!-- Add Host & LAN Scanner Modal -->
+    <dialog id="add-host-modal" class="modal">
+        <h3>Add New Host</h3>
+        <form method="dialog" onsubmit="submitAddHost(event)">
+            <label>Host Name: <input type="text" id="new-host-name" required placeholder="e.g. Database Server"></label>
+            <label>Address: <input type="text" id="new-host-ip" required placeholder="e.g. 192.168.1.50"></label>
+            <label>Category: <input type="text" id="new-host-category" required placeholder="e.g. Local Network" value="General"></label>
+            
+            <div style="border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px;">
+                <button type="button" onclick="scanLan()" id="btn-scan-lan" style="width: 100%;">🔍 Auto-Discover LAN Devices</button>
+                <div id="lan-results" class="lan-list" style="display: none;"></div>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" onclick="document.getElementById('add-host-modal').close()">Cancel</button>
+                <button type="submit">Save Host</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="/static/app.js?v=2"></script>
+</body>
+</html>
